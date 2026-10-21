@@ -2,6 +2,8 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const multer = require('multer');
 const Tesseract = require('tesseract.js');
 const sharp = require('sharp');
@@ -16,10 +18,46 @@ const { performVisualRegistration, verifyVisualOtp, performPromoClaim } = requir
 const DEFAULT_PROMO_CODES = ['WELCOMESP50', 'SPWELCOME50', 'pvlfree50'];
 
 const app = express();
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
-app.use(express.json());
+app.disable('x-powered-by');
+app.use(helmet());
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-const upload = multer({ storage: multer.memoryStorage() }).single('idImage');
+const PROD_ORIGIN = 'https://sportifah.netlify.app';
+const DEV_ORIGIN = 'http://localhost:5173';
+const allowedOrigins = [PROD_ORIGIN, DEV_ORIGIN];
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error('Origin not allowed by CORS'));
+  },
+  credentials: true
+}));
+
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please try again later.' }
+});
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many attempts. Please try again later.' }
+});
+
+app.use('/api/auth/login', authLimiter);
+app.use('/api/verify-otp', authLimiter);
+app.use('/api/register', authLimiter);
+app.use('/api/claim-promo-bulk', limiter);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }
+}).single('idImage');
 
 mongoose.connect(process.env.MONGO_URI)
   .then(async () => {
@@ -318,5 +356,58 @@ app.get('/api/claims', authenticateToken, async (req, res) => {
     }
 });
 
+// ==========================================
+// HEALTH CHECK
+// ==========================================
+app.get('/health', (req, res) => {
+    const dbState = mongoose.connection.readyState;
+    res.status(dbState === 1 ? 200 : 503).json({
+        status: dbState === 1 ? 'ok' : 'degraded',
+        db: dbState === 1 ? 'connected' : 'disconnected'
+    });
+});
+
+// ==========================================
+// NOT FOUND & CENTRAL ERROR HANDLER
+// ==========================================
+app.use((req, res) => {
+    res.status(404).json({ error: 'Not found' });
+});
+
+app.use((err, req, res, next) => {
+    if (err instanceof multer.MulterError) {
+        return res.status(400).json({ error: 'File upload error: ' + err.message });
+    }
+    if (err.type === 'entity.too.large') {
+        return res.status(413).json({ error: 'Request body too large' });
+    }
+    if (err.type === 'entity.parse.failed') {
+        return res.status(400).json({ error: 'Malformed JSON' });
+    }
+    if (err.message === 'Origin not allowed by CORS') {
+        return res.status(403).json({ error: 'Origin not allowed' });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+});
+
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+const SHUTDOWN_TIMEOUT = 10 * 1000;
+function shutdown(signal) {
+    console.log(`${signal} received. Shutting down gracefully...`);
+    server.close(() => {
+        console.log('HTTP server closed.');
+        mongoose.connection.close(false, () => {
+            console.log('MongoDB connection closed.');
+            process.exit(0);
+        });
+    });
+    setTimeout(() => {
+        console.error('Forcing shutdown after timeout.');
+        process.exit(1);
+    }, SHUTDOWN_TIMEOUT).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

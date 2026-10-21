@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { LayoutDashboard, Users, FileText, Eye, EyeOff, ChevronDown, ChevronUp, LogOut, CheckCircle, XCircle, Clock, Database, Shield, Plus, Search, User as UserIcon, Ticket, Loader2 } from 'lucide-react';
+import { apiUrl } from './config';
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
@@ -68,7 +69,7 @@ function App() {
   const fetchPromos = async () => {
     setPromosLoading(true);
     try {
-      const res = await fetch('/api/promos', { headers: { 'Authorization': `Bearer ${token}` } });
+      const res = await fetch(apiUrl('/api/promos'), { headers: { 'Authorization': `Bearer ${token}` } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load promo codes');
       setPromos(data);
@@ -82,7 +83,7 @@ function App() {
 
   const fetchAccounts = async () => {
     try {
-      const response = await fetch('/api/accounts', {
+      const response = await fetch(apiUrl('/api/accounts'), {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.status === 401 || response.status === 403) {
@@ -105,7 +106,7 @@ function App() {
     let cancelled = false;
     async function load() {
       if (!token || cancelled) return;
-      const res = await fetch('/api/accounts', {
+      const res = await fetch(apiUrl('/api/accounts'), {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (cancelled) return;
@@ -129,7 +130,7 @@ function App() {
     e.preventDefault();
     setAuthLoading(true); setAuthError('');
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(apiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: loginUsername, password: loginPassword })
@@ -168,7 +169,7 @@ function App() {
     formData.append('idImage', fileId);
 
     try {
-      const response = await fetch('/api/scan', { 
+      const response = await fetch(apiUrl('/api/scan'), { 
         method: 'POST', 
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData 
@@ -202,7 +203,7 @@ function App() {
     setLoading(true); setError('');
 
     try {
-      const response = await fetch('/api/register', {
+      const response = await fetch(apiUrl('/api/register'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ ...extractedData, mobile: cleanMobile }),
@@ -225,7 +226,7 @@ function App() {
     setLoading(true); setError('');
 
     try {
-      const response = await fetch('/api/verify-otp', {
+      const response = await fetch(apiUrl('/api/verify-otp'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ otpValue, mobile, ...extractedData, password: pendingData.password }),
@@ -246,7 +247,7 @@ function App() {
     setLoading(true); setError('');
 
     try {
-      const res = await fetch('/api/accounts/add', {
+      const res = await fetch(apiUrl('/api/accounts/add'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ mobile: manualMobile, password: manualPassword, kycVerified: manualKyc })
@@ -275,7 +276,7 @@ function App() {
     }
     setPromoError('');
     try {
-      const res = await fetch('/api/promos', {
+      const res = await fetch(apiUrl('/api/promos'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ code: trimmed })
@@ -320,7 +321,7 @@ function App() {
     const accountsToClaim = accounts.filter(a => selectedAccounts.includes(a._id));
 
     try {
-      const res = await fetch('/api/claim-promo-bulk', {
+      const res = await fetch(apiUrl('/api/claim-promo-bulk'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ 
@@ -352,7 +353,7 @@ function App() {
     if (!acc || !acc.plainPassword) { setSingleProcessing(false); setPromoError("No plaintext password on record for this account."); return; }
 
     try {
-      const res = await fetch('/api/claim-promo-bulk', {
+      const res = await fetch(apiUrl('/api/claim-promo-bulk'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ 

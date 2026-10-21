@@ -1,0 +1,14 @@
+[build]
+  base = "/"
+  publish = "client/dist"
+  command = "npm --prefix client install && npm --prefix client run build"
+
+[build.environment]
+  # Public value Vite embeds at build time. Set the same value in the Netlify
+  # dashboard so the hosted UI calls the Render backend.
+  VITE_API_BASE_URL = "https://spurty.onrender.com"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
