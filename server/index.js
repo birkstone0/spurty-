@@ -189,6 +189,117 @@ app.get('/api/accounts', authenticateToken, async (req, res) => {
     }
 });
 
+// Detailed failure records (blocked registrations / logins). Admin only.
+app.get('/api/logs', authenticateToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+    try {
+        const logs = await User.find({ status: 'failed' })
+            .select('-generatedPassword -plainPassword')
+            .sort({ createdAt: -1 });
+        res.json(logs);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Current operator identity for the profile page.
+app.get('/api/me', authenticateToken, async (req, res) => {
+    try {
+        const admin = await Admin.findById(req.user.id).select('-password');
+        if (!admin) return res.status(404).json({ error: 'Operator not found' });
+        res.json({ _id: admin._id, username: admin.username, role: admin.role });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Change the operator's own password.
+app.post('/api/me/password', authenticateToken, async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+        return res.status(400).json({ error: 'Current and new password are required.' });
+    }
+    if (newPassword.length < 8) {
+        return res.status(400).json({ error: 'New password must be at least 8 characters.' });
+    }
+    try {
+        const admin = await Admin.findById(req.user.id);
+        if (!admin) return res.status(404).json({ error: 'Operator not found' });
+
+        const valid = await bcrypt.compare(currentPassword, admin.password);
+        if (!valid) return res.status(401).json({ error: 'Current password is incorrect.' });
+
+        admin.password = newPassword;
+        await admin.save();
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Edit a customer account (name, mobile, KYC status).
+app.put('/api/accounts/:id', authenticateToken, async (req, res) => {
+    const { firstName, lastName, mobile, kycStatus } = req.body;
+    try {
+        const account = await User.findById(req.params.id);
+        if (!account) return res.status(404).json({ error: 'Account not found' });
+
+        // Data isolation: non-admins may only edit their own records.
+        if (req.user.role !== 'admin' && account.createdBy !== req.user.username) {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
+
+        if (mobile && mobile !== account.mobile) {
+            const dup = await User.findOne({ mobile, _id: { $ne: account._id } });
+            if (dup) return res.status(400).json({ error: 'Mobile already in use by another account.' });
+            account.mobile = mobile;
+        }
+        if (typeof firstName === 'string') account.firstName = firstName;
+        if (typeof lastName === 'string') account.lastName = lastName;
+        if (kycStatus && ['pending', 'approved', 'rejected', 'none'].includes(kycStatus)) {
+            account.kycStatus = kycStatus;
+        }
+        await account.save();
+        const clean = account.toObject();
+        delete clean.generatedPassword;
+        res.json({ success: true, user: clean });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Delete a customer account.
+app.delete('/api/accounts/:id', authenticateToken, async (req, res) => {
+    try {
+        const account = await User.findById(req.params.id);
+        if (!account) return res.status(404).json({ error: 'Account not found' });
+
+        if (req.user.role !== 'admin' && account.createdBy !== req.user.username) {
+            return res.status(403).json({ error: 'Forbidden' });
+        }
+        await User.findByIdAndDelete(account._id);
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Bulk delete customer accounts.
+app.post('/api/accounts/bulk-delete', authenticateToken, async (req, res) => {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: 'No accounts selected.' });
+    }
+    try {
+        let query = { _id: { $in: ids } };
+        if (req.user.role !== 'admin') query.createdBy = req.user.username;
+        const result = await User.deleteMany(query);
+        res.json({ success: true, deleted: result.deletedCount });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 app.post('/api/accounts/add', authenticateToken, async (req, res) => {
     const { mobile, password, kycVerified } = req.body;
     if (!mobile || !password) return res.status(400).json({ error: "Mobile and password are required." });
